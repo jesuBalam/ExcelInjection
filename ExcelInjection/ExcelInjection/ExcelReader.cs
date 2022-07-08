@@ -41,6 +41,7 @@ namespace ExcelInjection
 
                 DataTable dataTable = new DataTable(nameTable.Trim());
 
+                Console.WriteLine("Please wait. Reading and analyzing data. DON'T PRESS ANY KEY");
 
                 //Generate Headers
                 foreach (string file in filenames)
@@ -79,8 +80,7 @@ namespace ExcelInjection
                         {
                             DataColumn column = new DataColumn();
                             column.AllowDBNull = true;
-                            column.DataType = Type.GetType("System.String");
-                            column.MaxLength = int.MaxValue;
+                            column.DataType = Type.GetType("System.String");                            
                             column.ColumnName = columnNames[col - 1];
                             dataTable.Columns.Add(column);
                         }
@@ -189,16 +189,7 @@ namespace ExcelInjection
             var response = Console.ReadKey();
             if(response.Key == ConsoleKey.Y)
             {
-                Console.WriteLine("Creating table");
-                string queryDrop = string.Format("drop table if exists {0}", table.TableName);
-                using (var commandDrop = new SqlCommand(queryDrop, connection))
-                {
-                    int result = commandDrop.ExecuteNonQuery();
-                    if (result > 0)
-                    {
-                        Console.WriteLine("Table existed, dropped");
-                    }
-                }
+                Console.WriteLine("Creating table");               
                 using (var command = new SqlCommand(query, connection))
                 {
                     int result = command.ExecuteNonQuery();
