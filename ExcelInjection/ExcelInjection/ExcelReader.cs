@@ -36,7 +36,10 @@ namespace ExcelInjection
                 Microsoft.Office.Interop.Excel.Worksheet xlWorkSheet;
                 var missing = System.Reflection.Missing.Value;
 
-                DataTable dataTable = new DataTable("RfcReports");
+                Console.WriteLine("Enter table name target:");
+                string nameTable = Console.ReadLine();
+
+                DataTable dataTable = new DataTable(nameTable.Trim());
 
 
                 //Generate Headers
@@ -76,7 +79,8 @@ namespace ExcelInjection
                         {
                             DataColumn column = new DataColumn();
                             column.AllowDBNull = true;
-                            column.DataType = Type.GetType("System.String");                            
+                            column.DataType = Type.GetType("System.String");
+                            column.MaxLength = int.MaxValue;
                             column.ColumnName = columnNames[col - 1];
                             dataTable.Columns.Add(column);
                         }
@@ -135,8 +139,7 @@ namespace ExcelInjection
         }
 
         public static string CreateTABLE(string tableName, DataTable table)
-        {
-            Console.WriteLine("Creating table");
+        {            
             string sqlsc;
             sqlsc = "CREATE TABLE " + tableName + "(";
             for (int i = 0; i < table.Columns.Count; i++)
@@ -179,26 +182,34 @@ namespace ExcelInjection
 
         public static void Connection(string query, DataTable table)
         {
+
             SqlConnection connection = new SqlConnection(string.Format("Data Source={0}; database={1}; User ID={2}; Password={3}", ConfigurationManager.AppSettings["ServerDatabase"], ConfigurationManager.AppSettings["Database"], ConfigurationManager.AppSettings["User"], ConfigurationManager.AppSettings["Pass"]));
             connection.Open();
-            string queryDrop = string.Format("drop table if exists {0}", table.TableName);
-            using (var commandDrop = new SqlCommand(queryDrop, connection))
+            Console.Write("Do you need to create table? y/n");
+            var response = Console.ReadKey();
+            if(response.Key == ConsoleKey.Y)
             {
-                int result = commandDrop.ExecuteNonQuery();
-                if (result > 0)
+                Console.WriteLine("Creating table");
+                string queryDrop = string.Format("drop table if exists {0}", table.TableName);
+                using (var commandDrop = new SqlCommand(queryDrop, connection))
                 {
-                    Console.WriteLine("Table existed, dropped");
+                    int result = commandDrop.ExecuteNonQuery();
+                    if (result > 0)
+                    {
+                        Console.WriteLine("Table existed, dropped");
+                    }
                 }
-            }
-            using (var command = new SqlCommand(query, connection))
-            {
-                int result = command.ExecuteNonQuery();
-                if (result > 0)
+                using (var command = new SqlCommand(query, connection))
                 {
-                    Console.WriteLine("Completed query");
+                    int result = command.ExecuteNonQuery();
+                    if (result > 0)
+                    {
+                        Console.WriteLine("Completed query");
+                    }
                 }
+                Console.WriteLine("Table created");
             }
-            Console.WriteLine("Table created");
+           
             SqlBulkCopy bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.FireTriggers | SqlBulkCopyOptions.UseInternalTransaction, null);
             bulkCopy.DestinationTableName = table.TableName;
             bulkCopy.WriteToServer(table);
