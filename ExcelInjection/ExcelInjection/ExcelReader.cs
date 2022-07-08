@@ -76,9 +76,7 @@ namespace ExcelInjection
                         {
                             DataColumn column = new DataColumn();
                             column.AllowDBNull = true;
-                            column.DataType = Type.GetType("System.String");
-                            column.DefaultValue = string.Empty;
-                            column.MaxLength = 200;
+                            column.DataType = Type.GetType("System.String");                            
                             column.ColumnName = columnNames[col - 1];
                             dataTable.Columns.Add(column);
                         }
