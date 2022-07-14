@@ -7,6 +7,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace ExcelInjection
@@ -18,7 +19,9 @@ namespace ExcelInjection
             try
             {
                 int maxColumns = 0;
+                List<NewColumn> newColumnsDict = new List<NewColumn>();
                 List<string> columnNames = new List<string>();
+                List<string> newColumnNames = new List<string>();
                 List<string> filenames = new List<string>();
                 bool columnsFilled = false;
                 bool isUsingExistingTable = false;
@@ -36,8 +39,12 @@ namespace ExcelInjection
 
                 
 
-                Console.WriteLine("Enter table name target:");
+                Console.WriteLine("Enter table name target: (Default - SatData)");
                 string nameTable = Console.ReadLine();
+                if (string.IsNullOrEmpty(nameTable))
+                {
+                    nameTable = "SatData";
+                }
 
                 DataTable dataTable = new DataTable(nameTable.Trim());
                 columnNames.Clear();
@@ -49,7 +56,7 @@ namespace ExcelInjection
                     dataTable.Columns.Clear();
                     SqlConnection connection = new SqlConnection(string.Format("Data Source={0}; database={1}; User ID={2}; Password={3}", ConfigurationManager.AppSettings["ServerDatabase"], ConfigurationManager.AppSettings["Database"], ConfigurationManager.AppSettings["User"], ConfigurationManager.AppSettings["Pass"]));
                     connection.Open();
-                    string query = string.Format("USE {0} SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{1}' AND TABLE_SCHEMA = 'dbo'", ConfigurationManager.AppSettings["Database"], nameTable);
+                    string query = string.Format("USE {0} SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{1}' AND TABLE_SCHEMA = 'dbo'", ConfigurationManager.AppSettings["Database"], nameTable);
                     using (SqlCommand command = new SqlCommand(query, connection))
                     {
                         using (SqlDataReader oReader = command.ExecuteReader())
@@ -57,35 +64,18 @@ namespace ExcelInjection
                             while (oReader.Read())
                             {
                                 //Console.WriteLine(oReader["COLUMN_NAME"].ToString() + "-" + oReader["COLUMN_NAME"].GetType().ToString());
-                                DataColumn column = new DataColumn();
-                                //column.AllowDBNull = true;
-                                //column.DataType = oReader["COLUMN_NAME"].GetType();
-                                if (oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "Periodo".ToUpper().Replace(" ", "") 
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "Regimen emisor".ToUpper().Replace(" ", "")
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "Tipo de cambio".ToUpper().Replace(" ", "")
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "Forma pago".ToUpper().Replace(" ", ""))
+                                DataColumn column = new DataColumn();                                
+                                
+                                if (Utils.GetType(oReader["COLUMN_NAME"].ToString()) == TypeData.Int || oReader["DATA_TYPE"].ToString() == "int")
                                 {
                                     column.DataType = typeof(Int32);
                                 }
-                                else if (oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "Version".ToUpper().Replace(" ", "")
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "SubTotal".ToUpper().Replace(" ", "")
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "Descuento".ToUpper().Replace(" ", "")
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "IVA Trasladado 0%".ToUpper().Replace(" ", "")
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "IVA Trasladado 16%".ToUpper().Replace(" ", "")
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "IVA Retenido".ToUpper().Replace(" ", "")
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "ISR Retenido".ToUpper().Replace(" ", "")
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "IEPS Trasladado".ToUpper().Replace(" ", "")
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "Local retenido".ToUpper().Replace(" ", "")
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "Local trasladado".ToUpper().Replace(" ", "")
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "Total".ToUpper().Replace(" ", "")
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "IVA Trasladado".ToUpper().Replace(" ",""))
+                                else if (Utils.GetType(oReader["COLUMN_NAME"].ToString()) == TypeData.Decimal || oReader["DATA_TYPE"].ToString() == "decimal")
                                 {
                                     column.DataType = typeof(Decimal);
 
                                 }
-                                else if (oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "Fecha emision".ToUpper().Replace(" ", "") 
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "Fecha certificacion".ToUpper().Replace(" ", "") 
-                                    || oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "") == "Fecha proceso cancelacion".ToUpper().Replace(" ", ""))
+                                else if (Utils.GetType(oReader["COLUMN_NAME"].ToString()) == TypeData.DateTime || oReader["DATA_TYPE"].ToString() == "datetime")
                                 {
 
                                     column.DataType = typeof(DateTime);
@@ -94,7 +84,7 @@ namespace ExcelInjection
                                 {
                                     column.DataType = typeof(String);
                                 }
-                                column.ColumnName = oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", "");
+                                column.ColumnName = oReader["COLUMN_NAME"].ToString();
                                 dataTable.Columns.Add(column);
                                 columnNames.Add(oReader["COLUMN_NAME"].ToString().ToUpper().Replace(" ", ""));
                             }
@@ -111,8 +101,84 @@ namespace ExcelInjection
                 Microsoft.Office.Interop.Excel.Workbook xlWorkBook;
                 Microsoft.Office.Interop.Excel.Worksheet xlWorkSheet;
                 var missing = System.Reflection.Missing.Value;
+
+                //Search new headers
+                foreach (string file in filenames)
+                {
+                    xlApp = new Microsoft.Office.Interop.Excel.Application();
+                    xlWorkBook = xlApp.Workbooks.Open(file, false, true, missing, missing, missing, true, Microsoft.Office.Interop.Excel.XlPlatform.xlWindows, '\t', false, false, 0, false, true, 0);
+                    xlWorkSheet = (Microsoft.Office.Interop.Excel.Worksheet)xlWorkBook.Worksheets.get_Item(1);
+
+                    Microsoft.Office.Interop.Excel.Range xlRange = xlWorkSheet.UsedRange;
+                    Array myValues = (Array)xlRange.Cells.Value2;
+
+                    int vertical = myValues.GetLength(0);
+                    int horizontal = myValues.GetLength(1);
+
+
+                    for (int i = 1; i <= horizontal; i++)
+                    {
+                        //dt.Columns.Add(new DataColumn(myValues.GetValue(1, i).ToString()));
+                        string cleanColumn = Regex.Replace(myValues.GetValue(1, i).ToString(), @"[^0-9a-zA-Z]+", "");
+                        if (!columnNames.Contains(cleanColumn.ToUpper().Replace(" ", "")))
+                        {
+                            newColumnNames.Add(cleanColumn.Replace(" ", ""));
+                            columnNames.Add(cleanColumn.ToUpper().Replace(" ", ""));
+                        }
+                    }
+                   
+                    xlWorkBook.Close(true, missing, missing);
+                    xlApp.Quit();
+                }
+
+                //Ask types
+                if (newColumnNames.Count > 0)
+                {
+                    Console.WriteLine("New Columns founded in files:");
+                    for(int col = 0; col< newColumnNames.Count; col++)
+                    {
+                        Console.WriteLine(newColumnNames[col]);
+                    }
+                    Console.WriteLine("Write type of value of each column: (v: varchar, i: int, t: datetime, d: decimal)");
+                    for (int col = 0; col < newColumnNames.Count; col++)
+                    {
+                        Console.WriteLine(newColumnNames[col]);
+                        var typeReaded = Console.ReadKey();
+                        DataColumn column = new DataColumn();
+                        //column.AllowDBNull = true;
+                        column.DataType = typeReaded.Key == ConsoleKey.D ? typeof(Decimal) : typeReaded.Key == ConsoleKey.I ? typeof(Int32) : typeReaded.Key == ConsoleKey.T ? typeof(DateTime) : typeof(String);
+                        column.ColumnName = newColumnNames[col];
+                        dataTable.Columns.Add(column);
+                        switch(typeReaded.Key)
+                        {
+                            case ConsoleKey.D:
+                                Utils.columnsDecimal.Add(newColumnNames[col].ToString().ToUpper().Replace(" ", ""));
+                                newColumnsDict.Add(new NewColumn { name = newColumnNames[col].Replace(" ", ""), type = "decimal(10,2)" });
+                                break;
+                            case ConsoleKey.I:
+                                Utils.columnsInt.Add(newColumnNames[col].ToString().ToUpper().Replace(" ", ""));
+                                newColumnsDict.Add(new NewColumn { name = newColumnNames[col].Replace(" ", ""), type = "int" });
+                                break;
+                            case ConsoleKey.T:
+                                Utils.columnsDate.Add(newColumnNames[col].ToString().ToUpper().Replace(" ", ""));
+                                newColumnsDict.Add(new NewColumn { name = newColumnNames[col].Replace(" ", ""), type = "datetime" });
+                                break;
+                            case ConsoleKey.V:
+                                Utils.columnsString.Add(newColumnNames[col].ToString().ToUpper().Replace(" ", ""));
+                                newColumnsDict.Add(new NewColumn { name = newColumnNames[col].Replace(" ", ""), type = "varchar(max)" });
+                                break;
+                            default:
+                                Utils.columnsString.Add(newColumnNames[col].ToString().ToUpper().Replace(" ", ""));
+                                newColumnsDict.Add(new NewColumn { name = newColumnNames[col].Replace(" ", ""), type = "varchar(max)" });
+                                break;
+                        }
+                    }
+                    Console.WriteLine("Building new table, dont press any key");
+                }
+
+
                 //Generate Headers
-                if(!columnsFilled)
+                if (!columnsFilled)
                 {
                     foreach (string file in filenames)
                     {
@@ -158,9 +224,10 @@ namespace ExcelInjection
                         xlWorkBook.Close(true, missing, missing);
                         xlApp.Quit();
                     }
-                }                
+                }
 
                 //Generate Rows
+                Console.WriteLine("Generating rows. Wait.");
 
                 foreach (string file in filenames)
                 {
@@ -182,30 +249,17 @@ namespace ExcelInjection
                         }
                         for (int b = 1; b <= horizontal; b++)
                         {
-                            var currentCol = columnNames.Find(name => name.ToUpper().Replace(" ", "") == myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", ""));
+                            string cleanColumn = Regex.Replace(myValues.GetValue(1, b).ToString(), @"[^0-9a-zA-Z]+", "");
+                            var currentCol = columnNames.Find(name => name.ToUpper().Replace(" ", "") == cleanColumn.ToUpper().Replace(" ", ""));
                             
                             if (!string.IsNullOrEmpty(currentCol))
                             {
                                 var index = columnNames.IndexOf(currentCol);
-                                if (myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "Periodo".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "Regimen emisor".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "Tipo de cambio".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "Forma pago".ToUpper().Replace(" ", ""))
+                                if (Utils.GetType(cleanColumn) == TypeData.Int)
                                 {
                                     poop[index] = Convert.ToInt32(myValues.GetValue(a, b));
                                 }
-                                else if (myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "Version".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "SubTotal".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "Descuento".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "IVA Trasladado 0%".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "IVA Trasladado 16%".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "IVA Retenido".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "ISR Retenido".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "IEPS Trasladado".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "Local retenido".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "Local trasladado".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "Total".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "IVA Trasladado".ToUpper().Replace(" ", ""))
+                                else if (Utils.GetType(cleanColumn) == TypeData.Decimal)
                                 {
                                     if (myValues.GetValue(a, b) != null && !string.IsNullOrEmpty(myValues.GetValue(a, b).ToString()))
                                     {
@@ -224,9 +278,7 @@ namespace ExcelInjection
                                     }
 
                                 }
-                                else if(myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "Fecha emision".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "Fecha certificacion".ToUpper().Replace(" ", "")
-                                    || myValues.GetValue(1, b).ToString().ToUpper().Replace(" ", "") == "Fecha proceso cancelacion".ToUpper().Replace(" ", ""))
+                                else if(Utils.GetType(cleanColumn) == TypeData.DateTime)
                                 {
                                     if(myValues.GetValue(a, b) != null)
                                     {
@@ -265,13 +317,13 @@ namespace ExcelInjection
 
                     xlWorkBook.Close(true, missing, missing);
                     xlApp.Quit();
-                }
-                for (int c = 0; c < dataTable.Columns.Count; c++)
-                {
-                    Console.WriteLine(dataTable.Rows[0][c]);
-                }
+                }              
                 Console.WriteLine("Total registers readed: " + dataTable.Rows.Count);
                 Console.ReadKey();
+                if(newColumnNames.Count>0)
+                {
+                    UpdateTable(dataTable.TableName, newColumnsDict);
+                }                
                 string queryTable = CreateTABLE(dataTable.TableName, dataTable);
                 Connection(queryTable, dataTable, isUsingExistingTable);
             }
@@ -322,6 +374,38 @@ namespace ExcelInjection
                 sqlsc += ",";
             }
             return sqlsc.Substring(0, sqlsc.Length - 1) + "\n)";
+        }
+
+        public static void UpdateTable(string tableName, List<NewColumn> columns)
+        {
+            Console.WriteLine("Updating sql table..");
+            string queryAdd = string.Format("ALTER TABLE {0} ADD ", tableName);
+            string columnsToAdd = "";
+            for(int col = 0; col<columns.Count; col++)
+            {
+                if(col==columns.Count-1)
+                {
+                    columnsToAdd += string.Format("{0} {1} ", columns[col].name, columns[col].type);
+                }
+                else
+                {
+                    columnsToAdd += string.Format("{0} {1}, ", columns[col].name, columns[col].type);
+                }
+            }
+            string finalQuery = queryAdd + columnsToAdd;
+            SqlConnection connection = new SqlConnection(string.Format("Data Source={0}; database={1}; User ID={2}; Password={3}", ConfigurationManager.AppSettings["ServerDatabase"], ConfigurationManager.AppSettings["Database"], ConfigurationManager.AppSettings["User"], ConfigurationManager.AppSettings["Pass"]));
+            connection.Open();
+            using (var command = new SqlCommand(finalQuery, connection))
+            {
+                int result = command.ExecuteNonQuery();
+                if (result > 0)
+                {
+                    Console.WriteLine("SQL Table update with new columns");
+                }
+            }
+            connection.Close();
+            Console.WriteLine("SQL Table update with new columns. Press any key");
+            Console.ReadKey();
         }
 
         public static void Connection(string query, DataTable table, bool existTable)
